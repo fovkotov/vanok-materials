@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Материалы — Vanok</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #14161a;
+      --panel: #1c1f25;
+      --line: #31363f;
+      --text: #ece8df;
+      --muted: #9b968c;
+      --accent: #67c514;
+    }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.4 "Avenir Next", "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+    #stage { position: relative; flex: 1; min-width: 0; height: 100%; background: #17191d; }
+    #stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    #boot {
+      position: absolute;
+      left: 16px;
+      bottom: 16px;
+      margin: 0;
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: rgba(12, 13, 16, 0.82);
+      color: #d9d4c8;
+      pointer-events: none;
+    }
+    #boot[hidden] { display: none; }
+    aside {
+      width: 320px;
+      height: 100%;
+      box-sizing: border-box;
+      overflow: auto;
+      padding: 18px 16px 32px;
+      background: var(--panel);
+      border-left: 1px solid var(--line);
+    }
+    h1 { margin: 0 0 4px; font-size: 18px; font-weight: 650; }
+    h2 { margin: 18px 0 8px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
+    .hint { margin: 0 0 14px; color: var(--muted); }
+    label.field { display: block; margin: 0 0 12px; }
+    label.field span { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    label.field b { font-weight: 600; }
+    label.field i { font-style: normal; color: var(--muted); }
+    select, input[type="color"], button {
+      font: inherit;
+      color: var(--text);
+      background: #121418;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    select { width: 100%; padding: 8px 10px; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+    input[type="color"] { width: 100%; height: 36px; padding: 4px; cursor: pointer; }
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+    .presets button, #reset {
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+    .presets button[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: #243016;
+    }
+    #materials { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    #materials button {
+      width: 100%;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      text-align: left;
+      padding: 8px;
+      cursor: pointer;
+      background: #121418;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    #materials button[aria-pressed="true"] { border-color: var(--accent); }
+    #materials i {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      flex: none;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    #materials b { display: block; font-weight: 600; }
+    #materials small { color: var(--muted); }
+    #meta { margin: 0 0 12px; color: var(--muted); }
+    #reset { margin-top: 8px; }
+    @media (max-width: 800px) {
+      body { flex-direction: column; overflow: auto; }
+      #stage { flex: none; height: 68vh; }
+      aside { width: 100%; height: auto; border-left: 0; border-top: 1px solid var(--line); }
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="stage">
+    <p id="boot">Загрузка яблока…</p>
+  </div>
+  <aside>
+    <h1>Материалы</h1>
+    <p class="hint">Тяните, чтобы крутить. Колёсико приближает.</p>
+    <label class="field">Объект
+      <select id="object"></select>
+    </label>
+    <h2>Шейдер</h2>
+    <div class="presets" id="presets"></div>
+    <h2>Материалы</h2>
+    <ul id="materials"></ul>
+    <h2>Выбранный</h2>
+    <p id="meta"></p>
+    <label class="field">
+      <span><b>Цвет</b></span>
+      <input id="color" type="color" value="#67c514">
+    </label>
+    <label class="field">
+      <span><b>Металличность</b><i id="metal-out">0.00</i></span>
+      <input id="metal" type="range" min="0" max="1" step="0.01" value="0">
+    </label>
+    <label class="field">
+      <span><b>Шероховатость</b><i id="rough-out">0.42</i></span>
+      <input id="rough" type="range" min="0" max="1" step="0.01" value="0.42">
+    </label>
+    <button id="reset" type="button">Сбросить вид</button>
+  </aside>
+  <script>
+    window.addEventListener('unhandledrejection', (event) => {
+      const boot = document.getElementById('boot');
+      const reason = event.reason;
+      boot.hidden = false;
+      boot.textContent = 'Ошибка: ' + (reason && reason.message ? reason.message : reason);
+    });
+  </script>
+  <script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+
+const SKIN = { color: 0x67c514, emissive: 0x7be81a, emissiveIntensity: 0.1, metalness: 0, roughness: 0.42 };
+const STEM = { color: 0x7a4e28, emissive: 0x000000, emissiveIntensity: 0, metalness: 0, roughness: 0.64 };
+const LEAF = { color: 0x2f861f, emissive: 0x14300a, emissiveIntensity: 0.18, metalness: 0, roughness: 0.52 };
+const FLESH = { color: 0xf6e0b8, emissive: 0xf0d0a0, emissiveIntensity: 0.08, metalness: 0, roughness: 0.62 };
+const SEED = { color: 0x6b3a22, emissive: 0x2a140c, emissiveIntensity: 0.04, metalness: 0, roughness: 0.5 };
+const LOOK = {
+  PaleGreen: SKIN,
+  green: SKIN,
+  DarkBrown: STEM,
+  brown: STEM,
+  _defaultMat: STEM,
+  DarkGreen: LEAF,
+  brownLight: FLESH,
+  brownDark: SEED,
+};
+const LABELS = {
+  PaleGreen: 'Кожура',
+  green: 'Кожура',
+  DarkBrown: 'Хвостик',
+  brown: 'Хвостик',
+  _defaultMat: 'Хвостик',
+  DarkGreen: 'Лист',
+  brownLight: 'Мякоть',
+  brownDark: 'Семечки',
+  Body: 'Корпус',
+  Handle: 'Ручка',
+  Pad: 'Подушка',
+};
+const PRESETS = [
+  { id: 'teaser', label: 'Как в тизере' },
+  { id: 'iridescent', label: 'Радужные полосы' },
+  { id: 'matte', label: 'Мат' },
+  { id: 'plastic', label: 'Пластик' },
+  { id: 'chrome', label: 'Хром' },
+];
+const PRESET_TUNE = {
+  iridescent: { color: '#2f7bff', metalness: 0.12, roughness: 0.06 },
+  matte: { color: '#b7c6cb', metalness: 0, roughness: 1 },
+  plastic: { color: '#d5dee8', metalness: 0.02, roughness: 0.22 },
+  chrome: { color: '#e7eef5', metalness: 1, roughness: 0.08 },
+};
+
+const stage = document.getElementById('stage');
+const boot = document.getElementById('boot');
+const objectSelect = document.getElementById('object');
+const presetRow = document.getElementById('presets');
+const materialList = document.getElementById('materials');
+const meta = document.getElementById('meta');
+const colorInput = document.getElementById('color');
+const metalInput = document.getElementById('metal');
+const roughInput = document.getElementById('rough');
+const metalOut = document.getElementById('metal-out');
+const roughOut = document.getElementById('rough-out');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setClearColor(0x17191d, 1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.domElement.setAttribute('aria-label', 'Яблоко');
+stage.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 50);
+camera.position.set(2.25, 1.35, 2.85);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 0.05, 0);
+controls.minDistance = 1.1;
+controls.maxDistance = 9;
+controls.update();
+const home = { pos: camera.position.clone(), target: controls.target.clone() };
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const fill = new THREE.AmbientLight(0xffffff, 0.72);
+const key = new THREE.DirectionalLight(0xfff7f2, 4.45);
+const spark = new THREE.DirectionalLight(0xffffff, 0);
+placeKey();
+spark.position.set(2.4, 3.2, 1.6);
+scene.add(fill, key, spark);
+
+const toonMap = (() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 4;
+  canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  ['#6d7882', '#aeb8c2', '#e4ebf1', '#ffffff'].forEach((hex, i) => {
+    ctx.fillStyle = hex;
+    ctx.fillRect(i, 0, 1, 1);
+  });
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+})();
+
+const objects = [];
+let active = null;
+let selected = 0;
+
+function placeKey() {
+  const az = THREE.MathUtils.degToRad(-90);
+  const el = THREE.MathUtils.degToRad(52);
+  key.position.set(
+    Math.sin(az) * Math.cos(el),
+    Math.sin(el),
+    Math.cos(az) * Math.cos(el),
+  ).multiplyScalar(6.54);
+}
+
+function resize() {
+  const w = stage.clientWidth;
+  const h = stage.clientHeight;
+  if (w < 2 || h < 2) return;
+  renderer.setSize(w, h, false);
+  renderer.domElement.style.width = '100%';
+  renderer.domElement.style.height = '100%';
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+
+function hexOf(color) {
+  return '#' + color.getHexString();
+}
+
+function paintWhole(material) {
+  if (material.name === 'PaleGreen' || material.name === 'green') {
+    material.color.setHex(0x67c514);
+    material.emissive.setHex(0x67c514);
+    material.emissiveIntensity = 0.04;
+  }
+  material.roughness = 0.42;
+  material.metalness = 0;
+  const skin = material.name === 'PaleGreen' || material.name === 'green';
+  material.envMapIntensity = skin ? 0.22 : 0.12;
+  material.flatShading = false;
+}
+
+function paintStamp(material, meshName) {
+  material.flatShading = true;
+  material.envMapIntensity = meshName === 'Pad' ? 0.08 : 0.2;
+  material.metalness = 0;
+  material.needsUpdate = true;
+}
+
+function mapList(material) {
+  const keys = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap'];
+  const found = keys.filter((key) => material[key]);
+  return found.length ? found.join(', ') : 'нет';
+}
+
+function paintHalf(material) {
+  const look = LOOK[material.name];
+  if (!look) return;
+  material.color.setHex(look.color);
+  material.emissive.setHex(look.emissive);
+  material.emissiveIntensity = look.emissiveIntensity;
+  material.metalness = look.metalness;
+  material.roughness = look.roughness;
+  const skin = material.name === 'PaleGreen' || material.name === 'green';
+  material.envMapIntensity = skin ? 0.22 : 0.12;
+  material.side = material.name === 'DarkGreen' ? THREE.DoubleSide : THREE.FrontSide;
+  material.flatShading = false;
+  if (material.name === 'brownDark') {
+    material.polygonOffset = true;
+    material.polygonOffsetFactor = -2;
+    material.polygonOffsetUnits = -2;
+  }
+}
+
+function weldSmooth(geometry) {
+  const source = geometry.clone();
+  for (const name of ['normal', 'uv', 'uv1', 'uv2', 'uv3', 'tangent', 'color']) {
+    if (source.getAttribute(name)) source.deleteAttribute(name);
+  }
+  const merged = BufferGeometryUtils.mergeVertices(source, 1e-4);
+  source.dispose();
+  merged.computeVertexNormals();
+  return merged;
+}
+
+function cloneMaterials(root) {
+  root.traverse((node) => {
+    if (!node.isMesh || !node.material) return;
+    node.material = Array.isArray(node.material)
+      ? node.material.map((material) => material.clone())
+      : node.material.clone();
+  });
+}
+
+function fit(group) {
+  group.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(group);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z, 1e-6);
+  const scale = 1.65 / span;
+  group.scale.setScalar(scale);
+  group.position.copy(center).multiplyScalar(-scale);
+}
+
+function snapshot(material) {
+  return {
+    name: material.name || 'Material',
+    color: material.color.getHex(),
+    emissive: material.emissive ? material.emissive.getHex() : 0,
+    emissiveIntensity: material.emissiveIntensity || 0,
+    metalness: material.metalness ?? 0,
+    roughness: material.roughness ?? 1,
+    envMapIntensity: material.envMapIntensity ?? 1,
+    side: material.side,
+    polygonOffset: !!material.polygonOffset,
+    polygonOffsetFactor: material.polygonOffsetFactor || 0,
+    polygonOffsetUnits: material.polygonOffsetUnits || 0,
+    flatShading: !!material.flatShading,
+    maps: mapList(material),
+  };
+}
+
+function tuneFromSnap(snap) {
+  return {
+    color: '#' + snap.color.toString(16).padStart(6, '0'),
+    metalness: snap.metalness,
+    roughness: snap.roughness,
+  };
+}
+
+function localSize(mesh) {
+  const geo = mesh.geometry;
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const size = geo.boundingBox.getSize(new THREE.Vector3());
+  return Math.max(size.x, size.y, size.z, 1e-4);
+}
+
+function makeTeaser(slot) {
+  const snap = slot.snap;
+  const color = new THREE.Color(slot.tune.color);
+  const material = new THREE.MeshStandardMaterial({
+    name: snap.name,
+    color,
+    emissive: snap.emissive,
+    emissiveIntensity: snap.emissiveIntensity,
+    metalness: slot.tune.metalness,
+    roughness: slot.tune.roughness,
+    envMapIntensity: snap.envMapIntensity,
+    side: snap.side,
+    flatShading: !!snap.flatShading,
+    polygonOffset: snap.polygonOffset,
+    polygonOffsetFactor: snap.polygonOffsetFactor,
+    polygonOffsetUnits: snap.polygonOffsetUnits,
+  });
+  if (snap.name === 'PaleGreen' || snap.name === 'green') material.emissive.copy(color);
+  return material;
+}
+
+function makeIridescent(slot) {
+  const material = new THREE.MeshPhysicalMaterial({
+    name: slot.snap.name,
+    color: slot.tune.color,
+    metalness: slot.tune.metalness,
+    roughness: slot.tune.roughness,
+    clearcoat: 1,
+    clearcoatRoughness: 0.03,
+    iridescence: 1,
+    iridescenceIOR: 1.35,
+    iridescenceThicknessRange: [140, 520],
+    envMapIntensity: 1.35,
+  });
+  const uSize = localSize(slot.mesh);
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uSize = { value: uSize };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uSize;\nvarying vec3 vStripePos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvStripePos = transformed / max(uSize, 0.0001);');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vStripePos;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float w = vStripePos.y * 22.0 + sin(vStripePos.x * 13.0) * 1.45 + sin(vStripePos.z * 8.0) * 0.85;
+        float stripe = smoothstep(-0.08, 0.82, sin(w));
+        vec3 base = diffuseColor.rgb;
+        vec3 deep = base * vec3(0.18, 0.48, 1.25);
+        vec3 hot = mix(base, vec3(0.93, 0.97, 1.0), 0.72);
+        diffuseColor.rgb = mix(deep, hot, stripe);`);
+  };
+  material.customProgramCacheKey = () => 'vanok-iridescent-2';
+  return material;
+}
+
+function makeMatte(slot) {
+  return new THREE.MeshStandardMaterial({
+    name: slot.snap.name,
+    color: slot.tune.color,
+    metalness: slot.tune.metalness,
+    roughness: slot.tune.roughness,
+    envMapIntensity: 0.22,
+  });
+}
+
+function makePlastic(slot) {
+  const material = new THREE.MeshToonMaterial({
+    name: slot.snap.name,
+    color: slot.tune.color,
+    gradientMap: toonMap,
+    specular: new THREE.Color(0xffffff),
+    shininess: THREE.MathUtils.lerp(12, 140, 1 - slot.tune.roughness),
+  });
+  return material;
+}
+
+function makeChrome(slot) {
+  return new THREE.MeshPhysicalMaterial({
+    name: slot.snap.name,
+    color: slot.tune.color,
+    metalness: slot.tune.metalness,
+    roughness: slot.tune.roughness,
+    envMapIntensity: 1.4,
+    clearcoat: 0.35,
+    clearcoatRoughness: 0.04,
+  });
+}
+
+const BUILDERS = {
+  teaser: makeTeaser,
+  iridescent: makeIridescent,
+  matte: makeMatte,
+  plastic: makePlastic,
+  chrome: makeChrome,
+};
+
+function assignMaterial(slot, material) {
+  const mesh = slot.mesh;
+  if (Array.isArray(mesh.material)) {
+    const next = mesh.material.slice();
+    next[slot.index] = material;
+    mesh.material = next;
+  } else {
+    mesh.material = material;
+  }
+  if (slot.material && slot.material !== material) slot.material.dispose();
+  slot.material = material;
+}
+
+function applyLighting(preset) {
+  const shiny = preset === 'iridescent' || preset === 'chrome' || preset === 'plastic';
+  scene.environmentIntensity = preset === 'teaser' ? 0 : preset === 'matte' ? 0.28 : preset === 'plastic' ? 0.55 : 1.15;
+  key.intensity = preset === 'teaser' ? 4.45 : preset === 'matte' ? 1.2 : preset === 'chrome' ? 1.15 : 2.3;
+  key.color.setHex(preset === 'teaser' ? 0xfff7f2 : 0xffffff);
+  fill.intensity = preset === 'teaser' ? 0.72 : preset === 'matte' ? 0.92 : preset === 'chrome' ? 0.12 : 0.34;
+  spark.intensity = preset === 'iridescent' ? 3.6 : preset === 'chrome' ? 2.4 : preset === 'plastic' ? 1.8 : 0;
+  renderer.toneMapping = shiny ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+  renderer.toneMappingExposure = preset === 'chrome' ? 1.08 : 1;
+}
+
+function rebuildSlot(slot, preset) {
+  assignMaterial(slot, BUILDERS[preset](slot));
+}
+
+function setPreset(preset, resetTune) {
+  if (!active) return;
+  active.preset = preset;
+  for (const slot of active.slots) {
+    if (resetTune) {
+      slot.tune = preset === 'teaser'
+        ? tuneFromSnap(slot.snap)
+        : { ...PRESET_TUNE[preset] };
+    }
+    rebuildSlot(slot, preset);
+  }
+  applyLighting(preset);
+  syncPresetButtons();
+  renderMaterials();
+  syncSliders();
+}
+
+function currentSlot() {
+  return active.slots[selected] || active.slots[0];
+}
+
+function syncPresetButtons() {
+  for (const button of presetRow.querySelectorAll('button')) {
+    button.setAttribute('aria-pressed', button.dataset.preset === active.preset ? 'true' : 'false');
+  }
+}
+
+function typeLabel(material) {
+  if (material.isMeshToonMaterial) return 'тун';
+  if (material.isMeshPhysicalMaterial) return 'физический';
+  return 'стандартный';
+}
+
+function renderMaterials() {
+  materialList.replaceChildren();
+  active.slots.forEach((slot, index) => {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('aria-pressed', index === selected ? 'true' : 'false');
+    const swatch = document.createElement('i');
+    swatch.style.background = slot.tune.color;
+    const text = document.createElement('span');
+    const title = document.createElement('b');
+    title.textContent = LABELS[slot.snap.name] || slot.snap.name;
+    const detail = document.createElement('small');
+    detail.textContent = slot.snap.name + ' · ' + typeLabel(slot.material)
+      + ' · ' + slot.tune.color
+      + ' · металл ' + Number(slot.tune.metalness).toFixed(2)
+      + ' · шерох. ' + Number(slot.tune.roughness).toFixed(2)
+      + ' · карты: ' + slot.snap.maps;
+    text.append(title, detail);
+    button.append(swatch, text);
+    button.addEventListener('click', () => {
+      selected = index;
+      renderMaterials();
+      syncSliders();
+    });
+    item.append(button);
+    materialList.append(item);
+  });
+}
+
+function syncSliders() {
+  const slot = currentSlot();
+  colorInput.value = slot.tune.color;
+  metalInput.value = String(slot.tune.metalness);
+  roughInput.value = String(slot.tune.roughness);
+  metalOut.textContent = Number(slot.tune.metalness).toFixed(2);
+  roughOut.textContent = Number(slot.tune.roughness).toFixed(2);
+  const title = LABELS[slot.snap.name] || slot.snap.name;
+  meta.textContent = title + ' · ' + slot.material.type
+    + ' · ' + slot.tune.color
+    + ' · металл ' + Number(slot.tune.metalness).toFixed(2)
+    + ' · шерох. ' + Number(slot.tune.roughness).toFixed(2)
+    + ' · карты: ' + slot.snap.maps;
+}
+
+function retune() {
+  const slot = currentSlot();
+  slot.tune = {
+    color: colorInput.value,
+    metalness: Number(metalInput.value),
+    roughness: Number(roughInput.value),
+  };
+  metalOut.textContent = slot.tune.metalness.toFixed(2);
+  roughOut.textContent = slot.tune.roughness.toFixed(2);
+  rebuildSlot(slot, active.preset);
+  renderMaterials();
+  meta.textContent = (LABELS[slot.snap.name] || slot.snap.name) + ' · ' + slot.material.type
+    + ' · ' + slot.tune.color
+    + ' · металл ' + slot.tune.metalness.toFixed(2)
+    + ' · шерох. ' + slot.tune.roughness.toFixed(2)
+    + ' · карты: ' + slot.snap.maps;
+}
+
+function showObject(index) {
+  objects.forEach((object, i) => { object.root.visible = i === index; });
+  active = objects[index];
+  selected = 0;
+  applyLighting(active.preset);
+  renderMaterials();
+  syncPresetButtons();
+  syncSliders();
+}
+
+for (const preset of PRESETS) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = preset.label;
+  button.dataset.preset = preset.id;
+  button.addEventListener('click', () => setPreset(preset.id, true));
+  presetRow.append(button);
+}
+
+colorInput.addEventListener('input', retune);
+metalInput.addEventListener('input', retune);
+roughInput.addEventListener('input', retune);
+objectSelect.addEventListener('change', () => showObject(Number(objectSelect.value)));
+document.getElementById('reset').addEventListener('click', () => {
+  camera.position.copy(home.pos);
+  controls.target.copy(home.target);
+  controls.update();
+});
+
+new ResizeObserver(resize).observe(stage);
+resize();
+renderer.setAnimationLoop(() => {
+  controls.update();
+  renderer.render(scene, camera);
+});
+
+function collect(root, mode) {
+  const slots = [];
+  root.traverse((node) => {
+    if (!node.isMesh || !node.material) return;
+    const list = Array.isArray(node.material) ? node.material : [node.material];
+    list.forEach((material, index) => {
+      if (mode === 'half') paintHalf(material);
+      else if (mode === 'stamp') paintStamp(material, node.name);
+      else paintWhole(material);
+      const snap = snapshot(material);
+      slots.push({
+        mesh: node,
+        index,
+        snap,
+        tune: tuneFromSnap(snap),
+        material,
+      });
+    });
+  });
+  return slots;
+}
+
+async function loadObject(url, label, mode) {
+  const gltf = await new GLTFLoader().loadAsync(url);
+  const model = gltf.scene;
+  cloneMaterials(model);
+  model.traverse((node) => {
+    if (node.isMesh && node.geometry) node.geometry = weldSmooth(node.geometry);
+  });
+  const root = new THREE.Group();
+  root.add(model);
+  scene.add(root);
+  const slots = collect(root, mode);
+  fit(root);
+  root.visible = false;
+  return { url, label, root, slots, preset: 'teaser' };
+}
+
+const loaded = await Promise.allSettled([
+  loadObject('models/apple_green_quaternius.glb', 'Яблоко', 'whole'),
+  loadObject('models/apple_half_green.glb', 'Половинка', 'half'),
+  loadObject('models/stamp_round.glb', 'Печать', 'stamp'),
+]);
+const failed = [];
+for (const result of loaded) {
+  if (result.status === 'fulfilled') objects.push(result.value);
+  else failed.push(result.reason && result.reason.message ? result.reason.message : String(result.reason));
+}
+if (!objects.length) {
+  boot.hidden = false;
+  boot.textContent = 'Не удалось загрузить модель. ' + failed.join(' ');
+  throw new Error(failed.join(' ') || 'model load failed');
+}
+objectSelect.replaceChildren();
+objects.forEach((object, index) => {
+  const option = document.createElement('option');
+  option.value = String(index);
+  option.textContent = object.label;
+  objectSelect.append(option);
+});
+showObject(0);
+boot.hidden = true;
+
+globalThis.__playground = {
+  ready: true,
+  preset: () => active && active.preset,
+  object: () => active && active.label,
+  slots: () => active.slots.map((slot) => ({
+    name: slot.snap.name,
+    color: slot.tune.color,
+    metalness: slot.tune.metalness,
+    roughness: slot.tune.roughness,
+    type: slot.material.type,
+  })),
+  triangles: () => renderer.info.render.triangles,
+  size: () => ({
+    w: stage.clientWidth,
+    h: stage.clientHeight,
+    cw: renderer.domElement.width,
+    ch: renderer.domElement.height,
+  }),
+  setPreset: (id) => setPreset(id, true),
+  setColor: (hex) => { colorInput.value = hex; retune(); },
+  view: () => camera.position.toArray().map((n) => Math.round(n * 1000) / 1000),
+};
+  </script>
+</body>
+</html>
