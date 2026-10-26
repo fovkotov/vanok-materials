@@ -96,6 +96,20 @@
     #materials b { display: block; font-weight: 600; }
     #materials small { color: var(--muted); }
     #meta { margin: 0 0 12px; color: var(--muted); }
+    label.check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+    label.check input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--accent);
+    }
     #reset { margin-top: 8px; }
     @media (max-width: 800px) {
       body { flex-direction: column; overflow: auto; }
@@ -121,6 +135,10 @@
     <p class="hint">Тяните, чтобы крутить. Колёсико приближает.</p>
     <label class="field">Объект
       <select id="object"></select>
+    </label>
+    <label class="check">
+      <input id="shade-smooth" type="checkbox">
+      <span>Shade smooth</span>
     </label>
     <h2>Шейдер</h2>
     <div class="presets" id="presets"></div>
@@ -202,6 +220,7 @@ const PRESET_TUNE = {
 const stage = document.getElementById('stage');
 const boot = document.getElementById('boot');
 const objectSelect = document.getElementById('object');
+const shadeSmoothInput = document.getElementById('shade-smooth');
 const presetRow = document.getElementById('presets');
 const materialList = document.getElementById('materials');
 const meta = document.getElementById('meta');
@@ -514,6 +533,34 @@ function applyLighting(preset) {
 
 function rebuildSlot(slot, preset) {
   assignMaterial(slot, BUILDERS[preset](slot));
+  if (shadeSmoothInput.checked) {
+    slot.material.flatShading = false;
+    slot.material.needsUpdate = true;
+  }
+}
+
+function applyShadeSmooth(object) {
+  if (!object) return;
+  const on = shadeSmoothInput.checked;
+  const seen = new Set();
+  for (const slot of object.slots) {
+    const mesh = slot.mesh;
+    if (!seen.has(mesh)) {
+      seen.add(mesh);
+      const original = mesh.userData.originalGeometry;
+      if (on) {
+        if (!mesh.userData.smoothGeometry) {
+          mesh.userData.smoothGeometry = weldSmooth(original);
+        }
+        mesh.geometry = mesh.userData.smoothGeometry;
+      } else {
+        mesh.geometry = original;
+      }
+    }
+    const faceted = object.preset === 'teaser' ? !!slot.snap.flatShading : false;
+    slot.material.flatShading = on ? false : faceted;
+    slot.material.needsUpdate = true;
+  }
 }
 
 function setPreset(preset, resetTune) {
@@ -620,6 +667,7 @@ function showObject(index) {
   renderMaterials();
   syncPresetButtons();
   syncSliders();
+  applyShadeSmooth(active);
 }
 
 for (const preset of PRESETS) {
@@ -635,6 +683,7 @@ colorInput.addEventListener('input', retune);
 metalInput.addEventListener('input', retune);
 roughInput.addEventListener('input', retune);
 objectSelect.addEventListener('change', () => showObject(Number(objectSelect.value)));
+shadeSmoothInput.addEventListener('change', () => applyShadeSmooth(active));
 document.getElementById('reset').addEventListener('click', () => {
   camera.position.copy(home.pos);
   controls.target.copy(home.target);
@@ -675,7 +724,8 @@ async function loadObject(url, label, mode) {
   const model = gltf.scene;
   cloneMaterials(model);
   model.traverse((node) => {
-    if (node.isMesh && node.geometry) node.geometry = weldSmooth(node.geometry);
+    if (!node.isMesh || !node.geometry) return;
+    node.userData.originalGeometry = node.geometry.clone();
   });
   const root = new THREE.Group();
   root.add(model);
@@ -732,6 +782,22 @@ globalThis.__playground = {
   setPreset: (id) => setPreset(id, true),
   setColor: (hex) => { colorInput.value = hex; retune(); },
   view: () => camera.position.toArray().map((n) => Math.round(n * 1000) / 1000),
+  shadeSmooth: () => shadeSmoothInput.checked,
+  shadeInfo: () => {
+    const meshes = [];
+    const seen = new Set();
+    active.root.traverse((node) => {
+      if (!node.isMesh || seen.has(node)) return;
+      seen.add(node);
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      meshes.push({
+        name: node.name,
+        verts: node.geometry.getAttribute('position').count,
+        flat: materials.map((material) => material.flatShading),
+      });
+    });
+    return { on: shadeSmoothInput.checked, label: active.label, preset: active.preset, meshes };
+  },
 };
   </script>
 </body>
